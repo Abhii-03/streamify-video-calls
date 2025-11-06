@@ -1,3 +1,5 @@
+
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import {
@@ -8,16 +10,17 @@ import {
 } from "../lib/api";
 import { Link } from "react-router";
 import { CheckCircleIcon, MapPinIcon, UserPlusIcon, UsersIcon } from "lucide-react";
-
 import { capitialize } from "../lib/utils";
-
 import FriendCard, { getLanguageFlag } from "../components/FriendCard";
 import NoFriendsFound from "../components/NoFriendFound";
 
 const HomePage = () => {
   const queryClient = useQueryClient();
-  const [outgoingRequestsIds, setOutgoingRequestsIds] = useState(new Set());
 
+  const [outgoingRequestsIds, setOutgoingRequestsIds] = useState(new Set());
+  const [pendingIds, setPendingIds] = useState(new Set());
+
+  // ✅ Queries
   const { data: friends = [], isLoading: loadingFriends } = useQuery({
     queryKey: ["friends"],
     queryFn: getUserFriends,
@@ -33,17 +36,26 @@ const HomePage = () => {
     queryFn: getOutgoingFriendReqs,
   });
 
-  const { mutate: sendRequestMutation, isPending } = useMutation({
+  // ✅ Mutation (with per-user pending handling)
+  const { mutate: sendRequestMutation } = useMutation({
     mutationFn: sendFriendRequest,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["outgoingFriendReqs"] }),
+    onMutate: async (userId) => {
+      setPendingIds((prev) => new Set(prev.add(userId)));
+    },
+    onSettled: async (_, __, userId) => {
+      setPendingIds((prev) => {
+        const updated = new Set(prev);
+        updated.delete(userId);
+        return updated;
+      });
+      queryClient.invalidateQueries({ queryKey: ["outgoingFriendReqs"] });
+    },
   });
 
+  // ✅ Update outgoing request IDs
   useEffect(() => {
-    const outgoingIds = new Set();
     if (outgoingFriendReqs && outgoingFriendReqs.length > 0) {
-      outgoingFriendReqs.forEach((req) => {
-        outgoingIds.add(req.recipient._id);
-      });
+      const outgoingIds = new Set(outgoingFriendReqs.map((req) => req.recipient._id));
       setOutgoingRequestsIds(outgoingIds);
     }
   }, [outgoingFriendReqs]);
@@ -51,6 +63,7 @@ const HomePage = () => {
   return (
     <div className="p-4 sm:p-6 lg:p-8">
       <div className="container mx-auto space-y-10">
+        {/* Friends Section */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Your Friends</h2>
           <Link to="/notifications" className="btn btn-outline btn-sm">
@@ -73,6 +86,7 @@ const HomePage = () => {
           </div>
         )}
 
+        {/* Recommended Users Section */}
         <section>
           <div className="mb-6 sm:mb-8">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -100,6 +114,7 @@ const HomePage = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {recommendedUsers.map((user) => {
                 const hasRequestBeenSent = outgoingRequestsIds.has(user._id);
+                const isPending = pendingIds.has(user._id);
 
                 return (
                   <div
@@ -107,11 +122,11 @@ const HomePage = () => {
                     className="card bg-base-200 hover:shadow-lg transition-all duration-300"
                   >
                     <div className="card-body p-5 space-y-4">
+                      {/* User Info */}
                       <div className="flex items-center gap-3">
                         <div className="avatar size-16 rounded-full">
                           <img src={user.profilePic} alt={user.fullName} />
                         </div>
-
                         <div>
                           <h3 className="font-semibold text-lg">{user.fullName}</h3>
                           {user.location && (
@@ -123,7 +138,7 @@ const HomePage = () => {
                         </div>
                       </div>
 
-                      {/* Languages with flags */}
+                      {/* Languages */}
                       <div className="flex flex-wrap gap-1.5">
                         <span className="badge badge-secondary">
                           {getLanguageFlag(user.nativeLanguage)}
@@ -137,11 +152,11 @@ const HomePage = () => {
 
                       {user.bio && <p className="text-sm opacity-70">{user.bio}</p>}
 
-                      {/* Action button */}
+                      {/* Action Button */}
                       <button
                         className={`btn w-full mt-2 ${
                           hasRequestBeenSent ? "btn-disabled" : "btn-primary"
-                        } `}
+                        }`}
                         onClick={() => sendRequestMutation(user._id)}
                         disabled={hasRequestBeenSent || isPending}
                       >
@@ -149,6 +164,11 @@ const HomePage = () => {
                           <>
                             <CheckCircleIcon className="size-4 mr-2" />
                             Request Sent
+                          </>
+                        ) : isPending ? (
+                          <>
+                            <span className="loading loading-spinner size-4 mr-2" />
+                            Sending...
                           </>
                         ) : (
                           <>
@@ -170,3 +190,4 @@ const HomePage = () => {
 };
 
 export default HomePage;
+
